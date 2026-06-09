@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emojimizer</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --ink: #111111;
+    --muted: #9a9a9a;
+    --line: #111111;
+    --hair: #e3e3e3;
+    --fs: 12px;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    --sans: "Helvetica Neue", Arial, Helvetica, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    font-family: var(--sans);
+    font-size: var(--fs);
+    font-weight: 400;
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---- App shell ---- */
+  #app { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
+
+  /* ---- Left sidebar ---- */
+  #pane-ctl {
+    flex: 0 0 296px;
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hair) transparent;
+  }
+  #pane-ctl::-webkit-scrollbar { width: 6px; }
+  #pane-ctl::-webkit-scrollbar-track { background: transparent; }
+  #pane-ctl::-webkit-scrollbar-thumb { background: var(--hair); }
+
+  .ctl-head {
+    padding: 16px 16px 14px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .ctl-head h1 { font-size: var(--fs); font-weight: 600; margin-bottom: 3px; }
+  .ctl-head p { font-weight: 300; color: var(--muted); line-height: 1.5; }
+
+  /* Drop zone */
+  #dropzone {
+    margin: 12px 16px 0;
+    border: 1px solid var(--hair);
+    padding: 18px 12px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--muted);
+    font-weight: 300;
+    line-height: 1.6;
+    transition: border-color .12s, color .12s;
+    flex-shrink: 0;
+  }
+  #dropzone:hover, #dropzone.dragover { border-color: var(--line); color: var(--ink); }
+  #dropzone strong { font-weight: 600; color: var(--ink); display: block; }
+  #fileInput { display: none; }
+
+  /* Control groups */
+  #ctlBody { padding: 0 16px; flex-shrink: 0; }
+  .group { border-bottom: 1px solid var(--hair); padding: 12px 0 4px; }
+  .group h2 { font-size: var(--fs); font-weight: 600; margin-bottom: 8px; }
+  .ctl { margin-bottom: 10px; }
+  .ctl .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+  }
+  .ctl .row label { font-weight: 400; color: var(--ink); }
+  .ctl .val { font-family: var(--mono); font-size: var(--fs); color: var(--ink); }
+
+  /* Sliders — 1px track, round thumb, matches reference */
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 1px;
+    background: var(--ink);
+    cursor: pointer;
+    outline: none;
+    display: block;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    background: var(--bg);
+    border: 1px solid var(--ink);
+    border-radius: 50%;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 12px; height: 12px;
+    background: var(--bg);
+    border: 1px solid var(--ink);
+    border-radius: 50%;
+    border: 1px solid var(--ink);
+  }
+
+  /* Buttons */
+  .actions { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+  button {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--fs);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .12s, color .12s;
+    text-align: center;
+  }
+  button:hover:not(:disabled) { background: var(--ink); color: #fff; }
+  button:disabled { opacity: 0.3; cursor: not-allowed; }
+  button.primary { background: var(--ink); color: #fff; }
+  button.primary:hover:not(:disabled) { opacity: 0.8; }
+
+  /* Status / model note */
+  #status {
+    padding: 10px 16px;
+    font-weight: 300;
+    color: var(--muted);
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+  #modelStatus {
+    padding: 0 16px 12px;
+    font-weight: 300;
+    color: var(--muted);
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+  #modelStatus.ready { color: var(--ink); }
+
+  /* ---- Right main pane ---- */
+  #pane-main {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hair) transparent;
+  }
+  #pane-main::-webkit-scrollbar { width: 6px; }
+  #pane-main::-webkit-scrollbar-track { background: transparent; }
+  #pane-main::-webkit-scrollbar-thumb { background: var(--hair); }
+
+  /* Empty state */
+  #emptyState {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--muted);
+    font-weight: 300;
+    min-height: 300px;
+    padding: 48px;
+    text-align: center;
+    transition: color .12s;
+  }
+  #emptyState:hover { color: var(--ink); }
+  #emptyState .big { font-size: 36px; line-height: 1; }
+  #emptyState p { line-height: 1.6; }
+  #emptyState strong { font-weight: 600; color: var(--ink); }
+
+  /* Results */
+  #results { display: flex; flex-direction: column; }
+
+  /* Section header bar */
+  .section-bar {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--hair);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: var(--fs);
+    flex-shrink: 0;
+    background: var(--bg);
+  }
+  .section-bar .meta { font-weight: 300; color: var(--muted); font-family: var(--mono); }
+
+  /* Collage stage — white background, emoji overflow freely */
+  #collageStage {
+    position: relative;
+    width: 100%;
+    overflow: visible;
+    background: #ffffff;
+  }
+  #collageStage > img.spacer {
+    display: block;
+    width: 100%;
+    height: auto;
+    opacity: 0;
+    pointer-events: none;
+    user-select: none;
+  }
+  .collage-emoji {
+    position: absolute;
+    transform-origin: center center;
+    pointer-events: none;
+    line-height: 1;
+    filter: drop-shadow(0 1px 4px rgba(0,0,0,0.18));
+    will-change: transform;
+  }
+  .collage-emoji.bg {
+    filter: drop-shadow(0 1px 8px rgba(0,0,0,0.12)) saturate(0.85);
+  }
+
+  /* Original photo section */
+  #originalSection { border-top: 1px solid var(--hair); }
+  #previewImg { display: block; width: 100%; height: auto; }
+
+  /* ---- Mobile (≤720px) ---- */
+  @media (max-width: 720px) {
+    html, body { height: auto; overflow: auto; }
+    #app {
+      flex-direction: column;
+      height: auto;
+      min-height: 100vh;
+      overflow: visible;
+    }
+    #pane-ctl {
+      flex: none;
+      width: 100%;
+      border-right: none;
+      border-bottom: 1px solid var(--line);
+      overflow-y: visible;
+    }
+    #pane-main {
+      flex: none;
+      overflow-y: visible;
+    }
+    #emptyState { min-height: 220px; padding: 32px 24px; }
+    #ctlBody { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+    .group { padding-bottom: 4px; }
+    .actions { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+    .actions button { width: auto; flex: 1 1 120px; }
+  }
+  @media (max-width: 420px) {
+    #ctlBody { display: block; }
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ====== Left control sidebar ====== -->
+  <div id="pane-ctl">
+    <div class="ctl-head">
+      <h1>Emojimizer</h1>
+      <p>Photo to emoji moodboard. Runs entirely in your browser — nothing is uploaded.</p>
+    </div>
+
+    <div id="dropzone">
+      <strong>Click or drop a photo here</strong>
+      JPG, PNG, WebP, GIF
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+
+    <div id="ctlBody">
+      <div class="group">
+        <h2>Recognition</h2>
+        <div class="ctl">
+          <div class="row">
+            <label for="maxObjects">Max objects</label>
+            <span class="val" id="maxObjectsVal">30</span>
+          </div>
+          <input type="range" id="maxObjects" min="2" max="30" step="1" value="30">
+        </div>
+        <div class="ctl">
+          <div class="row">
+            <label for="confidence">Confidence</label>
+            <span class="val" id="confidenceVal">0.01</span>
+          </div>
+          <input type="range" id="confidence" min="0.01" max="0.80" step="0.01" value="0.01">
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Appearance</h2>
+        <div class="ctl">
+          <div class="row">
+            <label for="emojiScale">Scale</label>
+            <span class="val" id="emojiScaleVal">×8.4</span>
+          </div>
+          <input type="range" id="emojiScale" min="1" max="100" step="1" value="29">
+        </div>
+        <div class="ctl">
+          <div class="row">
+            <label for="atmosphere">Atmosphere</label>
+            <span class="val" id="atmosphereVal">0</span>
+          </div>
+          <input type="range" id="atmosphere" min="0" max="16" step="1" value="0">
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="exportJpgBtn" class="primary" disabled>Export JPG</button>
+      <button id="downloadBtn" disabled>Download encoding</button>
+    </div>
+
+    <div id="status">Load a photo to begin.</div>
+    <div id="modelStatus"></div>
+  </div>
+
+  <!-- ====== Right main pane ====== -->
+  <div id="pane-main">
+    <div id="emptyState">
+      <div class="big">🎭</div>
+      <p><strong>Drop a photo or click the panel on the left</strong><br>
+      Object recognition maps your photo to emoji, layered as a moodboard.</p>
+    </div>
+
+    <div id="results" class="hidden">
+      <div id="collageSection">
+        <div class="section-bar">
+          Emoji moodboard
+          <span class="meta" id="detectionSummary"></span>
+        </div>
+        <div id="collageStage"></div>
+      </div>
+      <div id="originalSection">
+        <div class="section-bar">
+          Original photo
+          <span class="meta" id="originalMeta"></span>
+        </div>
+        <img id="previewImg" alt="">
+      </div>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<script>
+(function () {
+  "use strict";
+
+  // -----------------------------------------------------------------------
+  // Emoji palette — a broad spread of colours so any pixel has a close match.
+  // -----------------------------------------------------------------------
+  const EMOJI_SOURCE = [
+    "🟥","🟧","🟨","🟩","🟦","🟪","🟫","⬛","⬜",
+    "🔴","🟠","🟡","🟢","🔵","🟣","🟤","⚫","⚪",
+    "🔶","🔷","🔸","🔹","🔺","🔻","💠","🔘","♦️","♥️","♣️","♠️",
+    "❤️","🧡","💛","💚","💙","💜","🤎","🖤","🤍","💗","💓","💖","💞","💝",
+    "🍎","🍓","🍒","🍅","🌶️","🌹","🌺","🦀","🦞","🍷","🎀","🧧","🚨","👹","🥵","🍉","🍣","🌷",
+    "🍊","🥕","🦊","🍑","🌅","🦁","🐅","🍂","🥭","🏀","🧱","🦺","🍁","🥨","🐯","🍯",
+    "🌟","⭐","🌞","🍋","🍌","🌻","🐥","🐤","🐣","🌽","🧀","🟡","⚡","🔆","🥇","🐝","🍮","🌼","🍪","🥞","🌕","💛",
+    "🌳","🌲","🌴","🍀","🥦","🥒","🐢","🐍","🦎","🐸","🍏","🥝","🌿","🥬","🌱","🦖","🐊","🥗","🎋","🦗","🌵","🍃","🐉","🦜",
+    "🌊","🐬","🐳","🦋","💎","❄️","🧊","🫐","🌀","🛰️","🌐","🪻","🐧","🔵","🌌","🧿","🦷","🥶","🌧️","🐋","🛸",
+    "🍇","🔮","🦄","🍆","🪻","🦪","🧙","🟣","🌌","🪼",
+    "🐻","🌰","🪵","🦫","🐴","🍫","🥖","🦔","🦌","🐿️","🥯","🍞","🦘","🐪","🐫","🥜","🪺","🍠","🦦",
+    "🐈‍⬛","🦇","🕶️","🎱","🌑","🐦‍⬛","🪦","🖤","🌚","🦂","🎩","🐜",
+    "☁️","🕊️","🐑","🦢","🩶","🐘","🦭","🌫️","🥥","🥚","🍚","🦴","🐇","⛄","👻","🦷","🤍","🌨️","🥛","🍙",
+    "🌤️","⛅","🌧️","🌈","🌪️","🌅","🌄","🌇","🌆","🏙️","🌉","🌃","🌁","🌠","🌌","🎆","🎇","🌒","🌓","🌔",
+    "😀","😃","😄","😁","😆","🙂","😉","😊","🥰","😍","🤩","😘","😋","🤗","😎","🤓","🥳","😴","🤤","😬",
+    "😐","😑","😏","🙄","😯","😮","😲","🥺","😢","😭","😱","😡","🤬","🥵","🥶","🤢","🤮","🤡","👽","🤖","💀","☠️",
+    "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔","🐧","🐦","🐤","🦉",
+    "🦅","🦆","🦇","🐺","🐗","🐴","🦄","🐝","🐛","🦋","🐌","🐞","🐜","🦟","🦗","🕷️","🦂","🐢","🐍","🦎",
+    "🦖","🦕","🐙","🦑","🦐","🦞","🦀","🐡","🐠","🐟","🐬","🐳","🐋","🦈","🐊","🐅","🐆","🦓","🦍","🦧",
+    "🐘","🦛","🦏","🐪","🐫","🦒","🦘","🐃","🐂","🐄","🐎","🐖","🐏","🐑","🦙","🐐","🦌","🐕","🐩","🦮",
+    "🍕","🍔","🌭","🥪","🌮","🌯","🥗","🥘","🍝","🍜","🍲","🍱","🍤","🍙","🍘","🍚","🍛","🍢","🍡","🍧",
+    "🍨","🍦","🥧","🧁","🍰","🎂","🍮","🍭","🍬","🍫","🍿","🧂","🥐","🥯","🍞","🥖","🧇","🥞","🧈","🥓",
+    "🥩","🍗","🍖","🌽","🥕","🧄","🧅","🥔","🍠","🍄","🥑","🥦","🥒","🥬","🌶️","🫑","🍅","🍆","🥥",
+    "🎈","🎉","🎊","🎁","🏆","🥇","🥈","🥉","🏅","🎯","🎮","🕹️","🎲","🧩","🪀","🪁","🎨","🖍️","🖌️","🧵",
+    "🔥","💧","🌪️","☄️","⚡","✨","💥","🌟","🔋","🔌","💡","🔦","🕯️","🧯","🛢️","💰","💵",
+    "🚗","🚕","🚙","🚌","🚓","🚑","🚒","🏎️","🚀","🛸","✈️","🚁","⛵","🚤","🛶","🚂","🚲","🛵","🏍️","🚜"
+  ];
+  const EMOJI_LIST = [...new Set(EMOJI_SOURCE)];
+
+  // -----------------------------------------------------------------------
+  // State
+  // -----------------------------------------------------------------------
+  let palette = [];
+  let currentImageInfo = null;
+  let currentCollage = null;
+  let cocoModel = null;
+  let classifierModel = null;
+  let modelLoadPromise = null;
+  let classifierLoadPromise = null;
+  let lastPredictions = null;
+  let lastClassifications = null;
+  let lastDetectionW = 0;
+  let lastDetectionH = 0;
+
+  // -----------------------------------------------------------------------
+  // DOM refs
+  // -----------------------------------------------------------------------
+  const statusEl        = document.getElementById("status");
+  const modelStatusEl   = document.getElementById("modelStatus");
+  const dropzoneEl      = document.getElementById("dropzone");
+  const fileInput       = document.getElementById("fileInput");
+  const previewImg      = document.getElementById("previewImg");
+  const collageStageEl  = document.getElementById("collageStage");
+  const emptyStateEl    = document.getElementById("emptyState");
+  const resultsEl       = document.getElementById("results");
+  const detectionSumEl  = document.getElementById("detectionSummary");
+  const originalMetaEl  = document.getElementById("originalMeta");
+  const maxObjectsSlider= document.getElementById("maxObjects");
+  const maxObjectsVal   = document.getElementById("maxObjectsVal");
+  const confidenceSlider= document.getElementById("confidence");
+  const confidenceVal   = document.getElementById("confidenceVal");
+  const scaleSlider     = document.getElementById("emojiScale");
+  const scaleVal        = document.getElementById("emojiScaleVal");
+  const atmosphereSlider= document.getElementById("atmosphere");
+  const atmosphereVal   = document.getElementById("atmosphereVal");
+  const exportJpgBtn    = document.getElementById("exportJpgBtn");
+  const downloadBtn     = document.getElementById("downloadBtn");
+
+  // -----------------------------------------------------------------------
+  // Palette builder
+  // -----------------------------------------------------------------------
+  function buildPalette() {
+    const SIZE = 32;
+    const canvas = document.createElement("canvas");
+    canvas.width = SIZE; canvas.height = SIZE;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `${SIZE}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",system-ui,sans-serif`;
+    const result = [];
+    for (const ch of EMOJI_LIST) {
+      ctx.clearRect(0, 0, SIZE, SIZE);
+      ctx.fillText(ch, SIZE / 2, SIZE / 2 + 1);
+      let data;
+      try { data = ctx.getImageData(0, 0, SIZE, SIZE).data; } catch (e) { continue; }
+      let r = 0, g = 0, b = 0, aSum = 0, opaquePixels = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3];
+        if (a > 16) { r += data[i] * a; g += data[i+1] * a; b += data[i+2] * a; aSum += a; opaquePixels++; }
+      }
+      if (aSum === 0 || opaquePixels < (SIZE * SIZE) * 0.04) continue;
+      result.push({ ch, r: r / aSum, g: g / aSum, b: b / aSum });
+    }
+    return result;
+  }
+
+  function nearestEmoji(r, g, b) {
+    let best = palette[0], bestDist = Infinity;
+    for (let i = 0; i < palette.length; i++) {
+      const e = palette[i];
+      const dr = e.r - r, dg = e.g - g, db = e.b - b;
+      const d = dr*dr*0.30 + dg*dg*0.59 + db*db*0.11;
+      if (d < bestDist) { bestDist = d; best = e; }
+    }
+    return best;
+  }
+
+  // -----------------------------------------------------------------------
+  // COCO-SSD emoji map
+  // -----------------------------------------------------------------------
+  const COCO_EMOJI_MAP = {
+    person: "🧑", bicycle: "🚲", car: "🚗", motorcycle: "🏍️", airplane: "✈️",
+    bus: "🚌", train: "🚂", truck: "🚚", boat: "⛵", "traffic light": "🚦",
+    "fire hydrant": "🚒", "stop sign": "🛑", "parking meter": "🅿️", bench: "🪑",
+    bird: "🐦", cat: "🐈", dog: "🐕", horse: "🐴", sheep: "🐑", cow: "🐄",
+    elephant: "🐘", bear: "🐻", zebra: "🦓", giraffe: "🦒", backpack: "🎒",
+    umbrella: "☂️", handbag: "👜", tie: "👔", suitcase: "🧳", frisbee: "🥏",
+    skis: "🎿", snowboard: "🏂", "sports ball": "⚽", kite: "🪁",
+    "baseball bat": "🏏", "baseball glove": "🧤", skateboard: "🛹",
+    surfboard: "🏄", "tennis racket": "🎾", bottle: "🍾", "wine glass": "🍷",
+    cup: "☕", fork: "🍴", knife: "🔪", spoon: "🥄", bowl: "🥣",
+    banana: "🍌", apple: "🍎", sandwich: "🥪", orange: "🍊", broccoli: "🥦",
+    carrot: "🥕", "hot dog": "🌭", pizza: "🍕", donut: "🍩", cake: "🍰",
+    chair: "🪑", couch: "🛋️", "potted plant": "🪴", bed: "🛏️",
+    "dining table": "🍽️", toilet: "🚽", tv: "📺", laptop: "💻", mouse: "🖱️",
+    remote: "🎮", keyboard: "⌨️", "cell phone": "📱", microwave: "📦",
+    oven: "🔥", toaster: "🍞", sink: "🚰", refrigerator: "🧊", book: "📖",
+    clock: "🕰️", vase: "🏺", scissors: "✂️", "teddy bear": "🧸",
+    "hair drier": "💨", toothbrush: "🪥"
+  };
+
+  // -----------------------------------------------------------------------
+  // MobileNet keyword→emoji
+  // -----------------------------------------------------------------------
+  const MN_KEYWORD_EMOJI = [
+    [["retriever","labrador","spaniel","terrier","poodle","bulldog","hound","setter","boxer","corgi","dalmatian","husky","beagle","shepherd","collie","dachshund","schnauzer","mastiff","wolfhound","chihuahua","rottweiler","samoyed","shih tzu","pomeranian","maltese","bichon","sled dog"], "🐕"],
+    [["cat","tabby","siamese","persian","kitten","kitty","cougar","jaguar","cheetah","lynx","wildcat"], "🐈"],
+    [["tiger"], "🐅"], [["lion"], "🦁"], [["bear","panda","koala","grizzly","polar bear"], "🐻"],
+    [["wolf","coyote","fox"], "🦊"], [["rabbit","hare","bunny"], "🐇"],
+    [["deer","elk","moose","antelope","gazelle","reindeer"], "🦌"],
+    [["horse","pony","stallion","mare","foal"], "🐴"], [["elephant","mammoth"], "🐘"],
+    [["zebra"], "🦓"], [["giraffe"], "🦒"], [["camel","dromedary"], "🐪"],
+    [["monkey","gorilla","chimpanzee","baboon","ape","orangutan","macaque","marmoset","lemur"], "🐒"],
+    [["cow","bison","buffalo","bull","ox","cattle"], "🐄"], [["pig","hog","boar","sow"], "🐷"],
+    [["sheep","ram","lamb","goat"], "🐑"], [["snake","cobra","python","viper","boa","anaconda","mamba"], "🐍"],
+    [["lizard","iguana","gecko","chameleon","anole"], "🦎"], [["crocodile","alligator","caiman"], "🐊"],
+    [["turtle","tortoise","terrapin"], "🐢"], [["frog","toad","salamander","newt"], "🐸"],
+    [["fish","salmon","trout","bass","cod","tuna","carp","goldfish","clown fish","nemo","perch"], "🐟"],
+    [["shark"], "🦈"], [["whale","dolphin","porpoise","orca"], "🐬"],
+    [["seal","sea lion","walrus","otter"], "🦭"], [["octopus","squid","cuttlefish"], "🐙"],
+    [["crab","lobster","shrimp","prawn","crayfish"], "🦀"], [["jellyfish","anemone","coral"], "🪼"],
+    [["bee","wasp","bumblebee","honeybee"], "🐝"], [["butterfly","moth"], "🦋"],
+    [["dragonfly","damselfly"], "🪲"], [["ant","termite","beetle","bug"], "🐜"],
+    [["spider","tarantula","scorpion"], "🕷️"], [["mushroom","fungus","toadstool"], "🍄"],
+    [["eagle","hawk","falcon","kite","osprey","vulture","kestrel","harrier"], "🦅"],
+    [["owl","barn owl","screech owl","great horned"], "🦉"],
+    [["parrot","macaw","cockatoo","parakeet","budgerigar"], "🦜"],
+    [["penguin"], "🐧"], [["flamingo"], "🦩"], [["peacock"], "🦚"], [["hummingbird"], "🌺"],
+    [["duck","goose","swan","pelican","heron","crane","stork"], "🦢"],
+    [["chicken","rooster","hen","turkey"], "🐔"],
+    [["robin","sparrow","finch","warbler","starling","crow","raven","jay","magpie","wren","thrush","tit","pigeon","dove"], "🐦"],
+    [["mountain","hill","peak","summit","ridge","alp"], "⛰️"], [["volcano"], "🌋"],
+    [["cliff","canyon","gorge","ravine","bluff"], "🏔️"],
+    [["beach","shore","coast","seaside","seashore","coastline"], "🏖️"],
+    [["ocean","sea","wave","surf","tide"], "🌊"], [["lake","pond","reservoir","lagoon"], "💧"],
+    [["river","stream","brook","creek","waterfall","rapids"], "🏞️"],
+    [["forest","wood","jungle","rainforest","woodland","grove","thicket"], "🌳"],
+    [["tree","palm","pine","oak","birch","maple","cedar","spruce","fir","redwood","sequoia","willow","poplar","eucalyptus","baobab","elm","ash"], "🌲"],
+    [["flower","blossom","bloom","rose","daisy","tulip","orchid","sunflower","chrysanthemum","hyacinth","carnation","iris","lily","lotus","peony","poppy","lavender"], "🌸"],
+    [["garden","meadow","prairie","savanna","grassland","field","lawn","moss"], "🌿"],
+    [["desert","dune","sahara","arid","wasteland"], "🏜️"],
+    [["glacier","iceberg","tundra","arctic","polar"], "❄️"],
+    [["cave","cavern","grotto"], "🪨"], [["sky","cloud","cumulus","stratus","fog","mist","haze"], "☁️"],
+    [["sunset","sunrise","dawn","dusk","golden hour","twilight"], "🌅"],
+    [["aurora","northern lights"], "🌌"], [["rainbow"], "🌈"],
+    [["lightning","thunder","storm","tornado","cyclone","hurricane"], "⛈️"],
+    [["snow","blizzard","frost","sleet"], "🌨️"], [["fire","flame","wildfire","lava","ember"], "🔥"],
+    [["moon","lunar","crescent"], "🌕"], [["sun","solar","sunshine"], "☀️"],
+    [["star","galaxy","nebula","cosmos","milky way","constellation"], "✨"],
+    [["pizza"], "🍕"], [["burger","hamburger","cheeseburger"], "🍔"],
+    [["hotdog","hot dog","sausage","frankfurter"], "🌭"],
+    [["taco","burrito","quesadilla","enchilada"], "🌮"],
+    [["bread","baguette","loaf","sourdough","bagel"], "🍞"],
+    [["cake","pastry","cupcake","gateau","torte"], "🍰"], [["donut","doughnut"], "🍩"],
+    [["cookie","biscuit","cracker","wafer"], "🍪"],
+    [["ice cream","gelato","sorbet","frozen yogurt","sundae"], "🍦"],
+    [["chocolate","cocoa","brownie","truffle"], "🍫"], [["candy","sweet","lollipop","caramel"], "🍭"],
+    [["apple"], "🍎"], [["banana"], "🍌"], [["orange","tangerine","clementine","citrus"], "🍊"],
+    [["lemon","lime"], "🍋"], [["strawberry","cherry","raspberry","cranberry"], "🍓"],
+    [["grape","blueberry","berry"], "🫐"], [["pineapple"], "🍍"], [["watermelon","melon"], "🍉"],
+    [["mango","papaya"], "🥭"], [["peach","apricot","nectarine"], "🍑"], [["pear"], "🍐"],
+    [["broccoli","spinach","kale","cabbage","lettuce","chard"], "🥦"],
+    [["carrot","radish","turnip","parsnip"], "🥕"], [["potato","sweet potato","yam"], "🥔"],
+    [["tomato"], "🍅"], [["mushroom"], "🍄"], [["corn","maize"], "🌽"],
+    [["pumpkin","squash","gourd"], "🎃"], [["avocado"], "🥑"],
+    [["coffee","espresso","cappuccino","latte","americano"], "☕"], [["tea","chai"], "🍵"],
+    [["beer","ale","lager","stout","brewery"], "🍺"], [["wine","champagne","vinegar","vineyard"], "🍷"],
+    [["cocktail","martini","margarita","mojito","gin"], "🍹"],
+    [["sushi","sashimi","nigiri","maki"], "🍣"],
+    [["pasta","noodle","ramen","spaghetti","linguine","penne","fettuccine","udon","pho"], "🍜"],
+    [["soup","stew","chowder","broth","bisque"], "🍲"], [["salad","bowl","greens"], "🥗"],
+    [["cheese","brie","cheddar","gouda","parmesan"], "🧀"], [["egg","omelette","scrambled","yolk"], "🥚"],
+    [["butter","cream"], "🧈"], [["rice","grain","cereal","oatmeal","porridge","gruel"], "🍚"],
+    [["sandwich","sub","club","blt"], "🥪"],
+    [["church","chapel","cathedral","basilica","mosque","synagogue","temple"], "⛪"],
+    [["castle","fortress","palace","chateau","citadel"], "🏰"],
+    [["bridge","viaduct","aqueduct"], "🌉"],
+    [["lighthouse","tower","pagoda","minaret","steeple"], "🗼"],
+    [["barn","farmhouse","silo","ranch"], "🏚️"], [["stadium","arena","amphitheater"], "🏟️"],
+    [["skyscraper","skyline","downtown","highrise","office block"], "🏙️"],
+    [["car","automobile","sedan","coupe","hatchback","suv","vehicle"], "🚗"],
+    [["sports car","race car","formula","nascar","ferrari","lamborghini","porsche"], "🏎️"],
+    [["truck","lorry","semi","van","pickup"], "🚚"], [["motorcycle","motorbike","scooter","moped"], "🏍️"],
+    [["airplane","aircraft","jet","airliner","biplane","glider"], "✈️"],
+    [["helicopter","chopper"], "🚁"], [["rocket","spacecraft","shuttle","spaceship"], "🚀"],
+    [["boat","ship","vessel","yacht","kayak","canoe","ferry","sailboat","rowboat"], "⛵"],
+    [["bicycle","bike","cycling"], "🚲"], [["train","locomotive","railway","subway","metro"], "🚂"],
+    [["book","library","novel","tome","textbook"], "📖"],
+    [["camera","photograph","photo","snapshot"], "📷"],
+    [["clock","watch","hourglass","sundial"], "🕰️"],
+    [["guitar","violin","cello","bass guitar","ukulele"], "🎸"],
+    [["piano","keyboard","organ","harpsichord"], "🎹"], [["drum","percussion","cymbal","snare"], "🥁"],
+    [["trumpet","trombone","horn","saxophone","flute","clarinet"], "🎺"],
+    [["ball","soccer","football","basketball","volleyball","baseball","cricket","tennis"], "⚽"],
+    [["cup","mug","chalice"], "☕"], [["bottle","jar","flask","vial"], "🍾"],
+    [["umbrella","parasol"], "☂️"],
+    [["hat","cap","helmet","beret","fedora","sombrero","bonnet","cowboy"], "🎩"],
+    [["shoe","sneaker","boot","sandal","slipper","trainer","heel","loafer"], "👟"],
+    [["backpack","bag","purse","briefcase","satchel"], "🎒"],
+    [["phone","smartphone","mobile","cellphone"], "📱"],
+    [["laptop","computer","notebook","macbook"], "💻"],
+    [["television","tv","screen","monitor"], "📺"],
+    [["chair","sofa","couch","armchair","stool","bench"], "🪑"],
+    [["bed","pillow","blanket","mattress","duvet","quilt"], "🛏️"],
+    [["candle","lantern","torch"], "🕯️"], [["mask","glasses","sunglasses","goggles","visor"], "🕶️"],
+    [["key","lock","padlock"], "🔑"], [["sword","dagger","knife","blade","spear","axe","weapon"], "⚔️"],
+    [["crown","tiara","diadem"], "👑"], [["flag","banner","pennant"], "🏳️"],
+    [["balloon","kite"], "🎈"], [["paintbrush","palette","canvas","easel","painting"], "🎨"],
+    [["pot","pan","wok","kettle","saucepan"], "🍳"],
+    [["toolbox","wrench","hammer","screwdriver","drill","tool"], "🔧"],
+  ];
+
+  function labelToEmoji(label) {
+    const lower = label.toLowerCase();
+    for (const [keywords, emoji] of MN_KEYWORD_EMOJI) {
+      for (const kw of keywords) { if (lower.includes(kw)) return emoji; }
+    }
+    return null;
+  }
+
+  // -----------------------------------------------------------------------
+  // Atmosphere palettes
+  // -----------------------------------------------------------------------
+  const ATMOSPHERE_PALETTES = {
+    foliage:  ["🌿","🌳","🌲","🍀","🌴","🪴","🍃","🌵"],
+    sky:      ["☁️","🌤️","🌊","💧","🐬","❄️","🌐","🌈"],
+    sunset:   ["🌅","🌇","🔥","🍂","🧡","🦋","🌆","✨"],
+    sunshine: ["☀️","🌻","🌾","🐝","🍋","⭐","🌼","🍯"],
+    floral:   ["🌸","🌷","🌺","💮","🦋","🪻","🌹","🍇"],
+    night:    ["🌌","🌑","✨","🌃","🪐","⭐","🌠","🦇"],
+    neutral:  ["☁️","🌫️","🪨","🕊️","🤍","🌥️","🩶","🐚"]
+  };
+
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    const d = max - min;
+    if (d !== 0) {
+      s = d / (1 - Math.abs(2*l - 1));
+      switch (max) {
+        case r: h = ((g-b)/d) % 6; break;
+        case g: h = (b-r)/d + 2;   break;
+        case b: h = (r-g)/d + 4;   break;
+      }
+      h *= 60; if (h < 0) h += 360;
+    }
+    return { h, s, l };
+  }
+
+  function averageImageColor(img) {
+    const SIZE = 16;
+    const c = document.createElement("canvas"); c.width = SIZE; c.height = SIZE;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, SIZE, SIZE);
+    const data = ctx.getImageData(0,0,SIZE,SIZE).data;
+    let r=0,g=0,b=0,n=0;
+    for (let i=0;i<data.length;i+=4){r+=data[i];g+=data[i+1];b+=data[i+2];n++;}
+    return { r:r/n, g:g/n, b:b/n };
+  }
+
+  function pickAtmosphereKey(avg) {
+    const { h, s, l } = rgbToHsl(avg.r, avg.g, avg.b);
+    if (l < 0.28) return "night";
+    if (s < 0.15) return "neutral";
+    if (h >= 70  && h < 170) return "foliage";
+    if (h >= 170 && h < 255) return "sky";
+    if (h >= 255 && h < 330) return "floral";
+    if (h >= 35  && h < 70)  return "sunshine";
+    return "sunset";
+  }
+
+  // -----------------------------------------------------------------------
+  // Detection canvas helper
+  // -----------------------------------------------------------------------
+  function prepareDetectionCanvas(img, maxDim) {
+    maxDim = maxDim || 1280;
+    const nw = img.naturalWidth, nh = img.naturalHeight;
+    const scale = Math.min(1, maxDim / Math.max(nw, nh));
+    const cw = Math.round(nw * scale), ch = Math.round(nh * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = cw; canvas.height = ch;
+    canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+    return canvas;
+  }
+
+  // -----------------------------------------------------------------------
+  // Model loading
+  // -----------------------------------------------------------------------
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src; s.crossOrigin = "anonymous";
+      s.onload = resolve; s.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+
+  function ensureModel() {
+    if (cocoModel) return Promise.resolve(cocoModel);
+    if (modelLoadPromise) return modelLoadPromise;
+    modelLoadPromise = (async () => {
+      modelStatusEl.textContent = "Loading object-recognition model (COCO-SSD, ~8 MB one-time)…";
+      modelStatusEl.className = "";
+      if (typeof tf === "undefined")
+        await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js");
+      if (typeof cocoSsd === "undefined")
+        await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js");
+      cocoModel = await cocoSsd.load({ base: "mobilenet_v2" });
+      return cocoModel;
+    })();
+    return modelLoadPromise;
+  }
+
+  function ensureClassifier() {
+    if (classifierModel) return Promise.resolve(classifierModel);
+    if (classifierLoadPromise) return classifierLoadPromise;
+    classifierLoadPromise = (async () => {
+      if (typeof tf === "undefined")
+        await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js");
+      if (typeof mobilenet === "undefined")
+        await loadScript("https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js");
+      classifierModel = await mobilenet.load({ version: 2, alpha: 1.0 });
+      modelStatusEl.textContent = "Models ready — recognition runs in your browser (nothing leaves your device).";
+      modelStatusEl.className = "ready";
+      return classifierModel;
+    })();
+    return classifierLoadPromise;
+  }
+
+  // -----------------------------------------------------------------------
+  // Scale: quadratic mapping so slider is precise at low end, reaches ×100
+  // v=10→×1.0  v=20→×4.0  v=29→×8.4  v=50→×25  v=100→×100
+  // -----------------------------------------------------------------------
+  function sliderToScale(v) { return Math.pow(parseFloat(v) / 10, 2); }
+  function scaleDisplayText(v) {
+    const s = sliderToScale(v);
+    return s >= 10 ? `×${s.toFixed(0)}` : `×${s.toFixed(1)}`;
+  }
+
+  // -----------------------------------------------------------------------
+  // Build collage layout
+  // -----------------------------------------------------------------------
+  function buildCollageLayout(img, predictions, classifications, opts) {
+    const { maxObjects, atmosphereCount, scale, detectionW, detectionH } = opts;
+    const bboxW = detectionW || img.naturalWidth;
+    const bboxH = detectionH || img.naturalHeight;
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const layout = [];
+    const S = scale || 1;
+
+    // Background atmosphere layer
+    if (atmosphereCount > 0) {
+      const avg = averageImageColor(img);
+      const key = pickAtmosphereKey(avg);
+      const moodEmoji = ATMOSPHERE_PALETTES[key];
+      let seed = (w*31 + h*17 + atmosphereCount*7) % 2147483647 || 1;
+      const rand = () => { seed = (seed*16807) % 2147483647; return (seed-1)/2147483646; };
+      for (let i = 0; i < atmosphereCount; i++) {
+        layout.push({
+          ch: moodEmoji[i % moodEmoji.length],
+          xPct: rand() * 92, yPct: rand() * 88,
+          sizePct: (14 + rand() * 16) * S,
+          rotation: Math.round((rand() - 0.5) * 50),
+          opacity: 0.35 + rand() * 0.35,
+          layer: "bg"
+        });
+      }
+    }
+
+    // Foreground COCO-SSD detections
+    const ranked = predictions.slice()
+      .sort((a,b) => (b.score*b.bbox[2]*b.bbox[3]) - (a.score*a.bbox[2]*a.bbox[3]))
+      .slice(0, maxObjects);
+
+    const fgEmoji = new Set();
+    for (const p of ranked) {
+      const [bx,by,bw,bh] = p.bbox;
+      const ch = COCO_EMOJI_MAP[p.class] || "❔";
+      fgEmoji.add(ch);
+      const cxPct = ((bx + bw/2) / bboxW) * 100;
+      const cyPct = ((by + bh/2) / bboxH) * 100;
+      const boxSpan = Math.max(bw, bh);
+      const refSpan = Math.min(bboxW, bboxH);
+      const rawSize = Math.max(8, (boxSpan / refSpan) * 100 * 0.95);
+      layout.push({
+        ch, xPct: cxPct, yPct: cyPct,
+        sizePct: rawSize * S,
+        rotation: Math.round((Math.random() - 0.5) * 28),
+        opacity: 0.9 + Math.random() * 0.1,
+        layer: "fg", label: p.class, score: p.score
+      });
+    }
+
+    // Scene-classifier layer (MobileNet)
+    if (classifications && classifications.length > 0) {
+      const mapped = classifications
+        .map(c => ({ emoji: labelToEmoji(c.className), prob: c.probability, label: c.className }))
+        .filter(c => c.emoji !== null && !fgEmoji.has(c.emoji));
+      const seenEmoji = new Set();
+      const unique = [];
+      for (const c of mapped) {
+        if (!seenEmoji.has(c.emoji)) { unique.push(c); seenEmoji.add(c.emoji); }
+        if (unique.length >= 9) break;
+      }
+      const GRID_W = 6, GRID_H = 5;
+      const gCanvas = document.createElement("canvas");
+      gCanvas.width = GRID_W; gCanvas.height = GRID_H;
+      const gctx = gCanvas.getContext("2d", { willReadFrequently: true });
+      gctx.drawImage(img, 0, 0, GRID_W, GRID_H);
+      const gridData = gctx.getImageData(0, 0, GRID_W, GRID_H).data;
+      const cells = [];
+      for (let gy = 0; gy < GRID_H; gy++) {
+        for (let gx = 0; gx < GRID_W; gx++) {
+          const i = (gy*GRID_W + gx)*4;
+          const cr = gridData[i], cg = gridData[i+1], cb = gridData[i+2];
+          const { h: ch, l: cl } = rgbToHsl(cr, cg, cb);
+          cells.push({ cx: ((gx+0.5)/GRID_W)*100, cy: ((gy+0.5)/GRID_H)*100, h: ch, l: cl, r: cr, g: cg, b: cb });
+        }
+      }
+      function cellScore(cell, emojiCh) {
+        const { h, l } = cell;
+        if ("☁️🌤️🌊💧🐬❄️🌐🌈⛈️🌨️✨🌌🌠".includes(emojiCh))
+          return (1 - cell.cy/100) + (h > 180 && h < 260 ? 0.4 : 0) + (l > 0.5 ? 0.3 : 0);
+        if ("🌿🌳🌲🍀🌴🪴🍃🌵🌸🌺🌼🌻🌾".includes(emojiCh))
+          return (h > 80 && h < 165 ? 0.6 : 0) + (l > 0.2 && l < 0.7 ? 0.3 : 0);
+        if ("🚗🚚🏎️🚌🚂🚲🏍️✈️⛵🚁🚀🚒🛑🅿️".includes(emojiCh))
+          return (cell.cy/100) + (l > 0.15 && l < 0.75 ? 0.2 : 0);
+        if ("🔥🌅🌇☀️🍕🍔🌮🍰🍎🍊🍌".includes(emojiCh))
+          return (h < 50 || h > 330 ? 0.5 : 0) + (l > 0.4 ? 0.2 : 0);
+        return 0.5 - Math.abs((cell.cx - 50)/100) - Math.abs((cell.cy - 50)/100)*0.5;
+      }
+      const usedCells = new Set();
+      for (let i = 0; i < unique.length; i++) {
+        const { emoji, prob, label } = unique[i];
+        const cellRanked = cells
+          .map((c, idx) => ({ ...c, idx, score: cellScore(c, emoji) }))
+          .filter(c => !usedCells.has(c.idx))
+          .sort((a,b) => b.score - a.score);
+        const cell = cellRanked[0] || cells[i % cells.length];
+        usedCells.add(cell.idx);
+        const jx = (Math.random() - 0.5) * (100/GRID_W) * 0.7;
+        const jy = (Math.random() - 0.5) * (100/GRID_H) * 0.7;
+        layout.push({
+          ch: emoji,
+          xPct: Math.max(4, Math.min(96, cell.cx + jx)),
+          yPct: Math.max(4, Math.min(92, cell.cy + jy)),
+          sizePct: (10 + prob * 22) * S,
+          rotation: Math.round((i*23 - 40) % 70 - 35),
+          opacity: 0.6 + prob * 0.35,
+          layer: "scene", label, score: prob
+        });
+      }
+    }
+    return layout;
+  }
+
+  // -----------------------------------------------------------------------
+  // Render collage to DOM
+  // -----------------------------------------------------------------------
+  function renderCollage(layout) {
+    collageStageEl.innerHTML = "";
+    const spacer = document.createElement("img");
+    spacer.className = "spacer";
+    spacer.src = previewImg.src;
+    spacer.alt = "";
+    collageStageEl.appendChild(spacer);
+    const zMap = { bg: 1, scene: 2, fg: 3 };
+    for (const item of layout) {
+      const span = document.createElement("span");
+      span.className = `collage-emoji ${item.layer === "bg" ? "bg" : "fg"}`;
+      span.textContent = item.ch;
+      span.style.left = `${item.xPct}%`;
+      span.style.top = `${item.yPct}%`;
+      span.style.fontSize = `${item.sizePct}%`;
+      span.style.opacity = item.opacity.toFixed(2);
+      span.style.transform = `translate(-50%, -50%) rotate(${item.rotation}deg)`;
+      span.style.zIndex = zMap[item.layer] ?? 2;
+      if (item.label) span.title = `${item.label} (${Math.round((item.score||0)*100)}%)`;
+      collageStageEl.appendChild(span);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Encode collage as text
+  // -----------------------------------------------------------------------
+  function encodeCollage(layout) {
+    return layout.map(it =>
+      `${it.ch}|${it.xPct.toFixed(1)}|${it.yPct.toFixed(1)}|${it.sizePct.toFixed(1)}|${it.rotation}|${it.layer}`
+    ).join("\n");
+  }
+
+  // -----------------------------------------------------------------------
+  // Rebuild from cache (no re-detection)
+  // -----------------------------------------------------------------------
+  function rebuildCollage() {
+    if (!previewImg.complete || !previewImg.naturalWidth) return;
+    if (!lastPredictions) { runCreativeReduction(true); return; }
+    const threshold = parseFloat(confidenceSlider.value);
+    const predictions = lastPredictions.filter(p => p.score >= threshold);
+    const layout = buildCollageLayout(previewImg, predictions, lastClassifications, {
+      maxObjects: parseInt(maxObjectsSlider.value, 10),
+      atmosphereCount: parseInt(atmosphereSlider.value, 10),
+      scale: sliderToScale(scaleSlider.value),
+      detectionW: lastDetectionW,
+      detectionH: lastDetectionH
+    });
+    currentCollage = layout;
+    renderCollage(layout);
+    updateButtons();
+  }
+
+  function updateButtons() {
+    const ok = currentCollage && currentCollage.length > 0;
+    exportJpgBtn.disabled = !ok;
+    downloadBtn.disabled = !ok;
+  }
+
+  // -----------------------------------------------------------------------
+  // Full detection + layout pipeline
+  // -----------------------------------------------------------------------
+  async function runCreativeReduction(forceRedetect) {
+    if (!previewImg.complete || !previewImg.naturalWidth) return;
+    try {
+      if (forceRedetect || !lastPredictions) {
+        statusEl.textContent = "Loading recognition model…";
+        const model = await ensureModel();
+        statusEl.textContent = "Scanning for objects…";
+        const detCanvas = prepareDetectionCanvas(previewImg, 1280);
+        lastDetectionW = detCanvas.width;
+        lastDetectionH = detCanvas.height;
+        lastPredictions = await model.detect(detCanvas, 40);
+        lastClassifications = null;
+      }
+      const threshold = parseFloat(confidenceSlider.value);
+      const predictions = lastPredictions.filter(p => p.score >= threshold);
+
+      if (!lastClassifications) {
+        statusEl.textContent = "Running scene classifier…";
+        try {
+          const clf = await ensureClassifier();
+          const clfCanvas = prepareDetectionCanvas(previewImg, 512);
+          lastClassifications = await clf.classify(clfCanvas, 12);
+        } catch (e) {
+          lastClassifications = [];
+          console.warn("MobileNet classifier failed:", e);
+        }
+      }
+
+      const layout = buildCollageLayout(previewImg, predictions, lastClassifications, {
+        maxObjects: parseInt(maxObjectsSlider.value, 10),
+        atmosphereCount: parseInt(atmosphereSlider.value, 10),
+        scale: sliderToScale(scaleSlider.value),
+        detectionW: lastDetectionW,
+        detectionH: lastDetectionH
+      });
+      currentCollage = layout;
+      renderCollage(layout);
+      updateButtons();
+
+      const cocoLabels = [...new Set(predictions.map(p => p.class))];
+      const sceneLabels = (lastClassifications || []).slice(0, 3).map(c => c.className.split(",")[0].trim());
+      const allLabels = [...cocoLabels, ...sceneLabels].slice(0, 6);
+      const summary = allLabels.length ? allLabels.join(" · ") : "no detections";
+      statusEl.textContent = `Found: ${summary}`;
+      detectionSumEl.textContent = `${predictions.length} obj · ${(lastClassifications||[]).length} scene`;
+
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent = `Recognition failed: ${err.message || err}. Check your connection (models load from CDN on first use).`;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // File loading
+  // -----------------------------------------------------------------------
+  function handleFile(file) {
+    if (!file || !file.type.startsWith("image/")) {
+      statusEl.textContent = "Please choose an image file.";
+      return;
+    }
+    statusEl.textContent = `Loading ${file.name}…`;
+    const url = URL.createObjectURL(file);
+    previewImg.onload = () => {
+      currentImageInfo = {
+        width: previewImg.naturalWidth,
+        height: previewImg.naturalHeight,
+        fileSize: file.size,
+        fileName: file.name
+      };
+      const kb = (file.size / 1024).toFixed(0);
+      originalMetaEl.textContent = `${previewImg.naturalWidth} × ${previewImg.naturalHeight}px — ${kb} KB`;
+      lastPredictions = null;
+      lastClassifications = null;
+      lastDetectionW = 0;
+      lastDetectionH = 0;
+      currentCollage = null;
+      emptyStateEl.classList.add("hidden");
+      resultsEl.classList.remove("hidden");
+      runCreativeReduction(true);
+    };
+    previewImg.onerror = () => { statusEl.textContent = "Couldn't load that image."; };
+    previewImg.src = url;
+  }
+
+  // -----------------------------------------------------------------------
+  // JPG export — draw emoji from layout data onto a canvas
+  // -----------------------------------------------------------------------
+  exportJpgBtn.addEventListener("click", () => {
+    if (!currentCollage || !currentCollage.length) return;
+
+    const stageW = collageStageEl.offsetWidth || 800;
+    const stageH = collageStageEl.offsetHeight || 600;
+    // Export at 2× the displayed size (up to 3000px wide)
+    const exportScale = Math.min(3, Math.max(1, 2400 / stageW));
+    const W = Math.round(stageW * exportScale);
+    const H = Math.round(stageH * exportScale);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+
+    // White background
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, H);
+
+    // The CSS base font-size is 12px (--fs). fontSize:N% on emoji spans means N/100 * 12px.
+    // We then scale that up by our export scale to match display fidelity.
+    const baseFontPx = 12;
+
+    for (const item of currentCollage) {
+      const cx = (item.xPct / 100) * W;
+      const cy = (item.yPct / 100) * H;
+      const fontPx = (item.sizePct / 100) * baseFontPx * exportScale;
+
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(item.rotation * Math.PI / 180);
+      ctx.globalAlpha = item.opacity;
+      ctx.font = `${fontPx}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(item.ch, 0, 0);
+      ctx.restore();
+    }
+
+    const base = currentImageInfo ? currentImageInfo.fileName.replace(/\.[^.]+$/, "") : "emojimizer";
+    const url = canvas.toDataURL("image/jpeg", 0.93);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${base}-emojimizer.jpg`;
+    a.click();
+  });
+
+  // -----------------------------------------------------------------------
+  // Download encoding
+  // -----------------------------------------------------------------------
+  downloadBtn.addEventListener("click", () => {
+    if (!currentCollage) return;
+    const ar = currentImageInfo ? (currentImageInfo.width / currentImageInfo.height).toFixed(4) : "1";
+    const header = `mode:creative aspect:${ar} format:emoji|x%|y%|size%|rotation|layer\n`;
+    const body = encodeCollage(currentCollage);
+    const blob = new Blob([header + body], { type: "text/plain;charset=utf-8" });
+    const base = currentImageInfo ? currentImageInfo.fileName.replace(/\.[^.]+$/, "") : "emojimizer";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${base}-emojimizer.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // -----------------------------------------------------------------------
+  // Slider wiring
+  // -----------------------------------------------------------------------
+  scaleSlider.addEventListener("input", () => {
+    scaleVal.textContent = scaleDisplayText(scaleSlider.value);
+    if (lastPredictions) rebuildCollage();
+  });
+
+  maxObjectsSlider.addEventListener("input", () => { maxObjectsVal.textContent = maxObjectsSlider.value; });
+  maxObjectsSlider.addEventListener("change", () => { if (lastPredictions) rebuildCollage(); });
+
+  confidenceSlider.addEventListener("input", () => {
+    confidenceVal.textContent = parseFloat(confidenceSlider.value).toFixed(2);
+  });
+  confidenceSlider.addEventListener("change", () => { if (lastPredictions) rebuildCollage(); });
+
+  atmosphereSlider.addEventListener("input", () => { atmosphereVal.textContent = atmosphereSlider.value; });
+  atmosphereSlider.addEventListener("change", () => { if (lastPredictions) rebuildCollage(); });
+
+  // -----------------------------------------------------------------------
+  // Drop zone / file input
+  // -----------------------------------------------------------------------
+  dropzoneEl.addEventListener("click", () => fileInput.click());
+  emptyStateEl.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", e => { if (e.target.files?.[0]) handleFile(e.target.files[0]); });
+
+  ["dragenter","dragover"].forEach(evt => dropzoneEl.addEventListener(evt, e => {
+    e.preventDefault(); dropzoneEl.classList.add("dragover");
+  }));
+  ["dragleave","drop"].forEach(evt => dropzoneEl.addEventListener(evt, e => {
+    e.preventDefault(); dropzoneEl.classList.remove("dragover");
+  }));
+  dropzoneEl.addEventListener("drop", e => {
+    const f = e.dataTransfer?.files?.[0]; if (f) handleFile(f);
+  });
+
+  // Full-page drag-and-drop
+  document.addEventListener("dragover", e => e.preventDefault());
+  document.addEventListener("drop", e => {
+    e.preventDefault();
+    const f = e.dataTransfer?.files?.[0]; if (f && f.type.startsWith("image/")) handleFile(f);
+  });
+
+  // -----------------------------------------------------------------------
+  // Init — set labels from defaults, build palette
+  // -----------------------------------------------------------------------
+  scaleVal.textContent = scaleDisplayText(scaleSlider.value);
+
+  (document.fonts?.ready || Promise.resolve()).then(() => {
+    palette = buildPalette();
+    statusEl.textContent = `Ready (${palette.length} palette emoji). Load a photo to begin.`;
+  });
+
+})();
+</script>
+</body>
+</html>
