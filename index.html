@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Emojimizer</title>
+<title>emojimiser</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -229,7 +229,7 @@
   <!-- Left sidebar -->
   <div id="pane-ctl">
     <div class="ctl-head">
-      <h1>Emojimizer</h1>
+      <h1>emojimiser</h1>
       <p>Photo &gt; emoji. Runs entirely in your browser — nothing is uploaded.</p>
     </div>
 
@@ -904,10 +904,10 @@
       ctx.textAlign="center";ctx.textBaseline="middle";
       ctx.fillText(item.ch,0,0);ctx.restore();
     }
-    const base=currentImageInfo?currentImageInfo.fileName.replace(/\.[^.]+$/,""):"emojimizer";
+    const base=currentImageInfo?currentImageInfo.fileName.replace(/\.[^.]+$/,""):"emojimiser";
     const a=document.createElement("a");
     a.href=canvas.toDataURL("image/jpeg",0.93);
-    a.download=`${base}-emojimizer.jpg`;a.click();
+    a.download=`${base}-emojimiser.jpg`;a.click();
   });
 
   // -----------------------------------------------------------------------
@@ -918,9 +918,9 @@
     const ar=currentImageInfo?(currentImageInfo.width/currentImageInfo.height).toFixed(4):"1";
     const header=`mode:creative aspect:${ar} format:emoji|x%|y%|size%|rotation|layer\n`;
     const blob=new Blob([header+encodeCollage(currentCollage)],{type:"text/plain;charset=utf-8"});
-    const base=currentImageInfo?currentImageInfo.fileName.replace(/\.[^.]+$/,""):"emojimizer";
+    const base=currentImageInfo?currentImageInfo.fileName.replace(/\.[^.]+$/,""):"emojimiser";
     const a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);a.download=`${base}-emojimizer.txt`;a.click();
+    a.href=URL.createObjectURL(blob);a.download=`${base}-emojimiser.txt`;a.click();
     URL.revokeObjectURL(a.href);
   });
 
