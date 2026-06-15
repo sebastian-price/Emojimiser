@@ -35,3 +35,7 @@ No build step. Open `emojimizer.html` in any modern browser.
 git clone https://github.com/yourname/emojimizer
 open emojimizer.html
 ```
+Concept and design by Seb Price.
+Originally conceived for Random Studios internal Creative Compression project, seeking to reduce its online footprint. Special thanks to Andrew Hill who developed the Random Studio version — read more here.
+
+This version was developed using Claude Cowork Sonnet 4.6, 9 June 2026.
