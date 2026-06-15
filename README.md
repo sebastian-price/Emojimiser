@@ -1,8 +1,8 @@
-# Emojimizer
+# Emojimiser
 
 **Photo > emoji.** Drop in a photo, get back a layered emoji moodboard.
 
-Runs entirely in the browser — no server, no uploads, no dependencies to install. Just open `emojimizer.html`.
+Runs entirely in the browser — no server, no uploads, no dependencies to install. Just open `emojimiser.html`.
 
 ## How it works
 
@@ -29,11 +29,11 @@ Both models download once from a CDN (~8 MB total), then run locally.
 
 ## Usage
 
-No build step. Open `emojimizer.html` in any modern browser.
+No build step. Open `emojimiser.html` in any modern browser.
 
 ```
-git clone https://github.com/yourname/emojimizer
-open emojimizer.html
+git clone https://github.com/yourname/emojimiser
+open emojimiser.html
 ```
 Concept and design by Seb Price.
 Originally conceived for Random Studios internal Creative Compression project, seeking to reduce its online footprint. Special thanks to Andrew Hill who developed the Random Studio version — read more here.
