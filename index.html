@@ -84,6 +84,25 @@
     background: var(--bg); border: 1px solid var(--ink); border-radius: 50%;
   }
 
+  .checkbox-row {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; font-weight: 400; color: var(--ink);
+  }
+  .checkbox-row input[type=checkbox] {
+    -webkit-appearance: none; appearance: none;
+    width: 12px; height: 12px; flex-shrink: 0;
+    border: 1px solid var(--ink); background: var(--bg);
+    cursor: pointer; position: relative;
+  }
+  .checkbox-row input[type=checkbox]:checked { background: var(--ink); }
+  .checkbox-row input[type=checkbox]:checked::after {
+    content: ""; position: absolute; left: 3px; top: 0px;
+    width: 3px; height: 7px;
+    border: solid #fff; border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+  }
+  .checkbox-row .hint { display: block; color: var(--muted); font-weight: 300; margin-top: 3px; }
+
   .actions { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
   button {
     width: 100%; padding: 9px 12px;
@@ -250,6 +269,13 @@
           <div class="row"><label for="confidence">Confidence</label><span class="val" id="confidenceVal">0.01</span></div>
           <input type="range" id="confidence" min="0.01" max="0.80" step="0.01" value="0.01">
         </div>
+        <div class="ctl">
+          <label class="checkbox-row" for="emotionToggle">
+            <input type="checkbox" id="emotionToggle">
+            <span>Detect emotion (faces)</span>
+          </label>
+          <span class="hint">Swaps the person emoji for a matching expression — loads an extra model on first use.</span>
+        </div>
       </div>
       <div class="group">
         <h2>Appearance</h2>
@@ -359,6 +385,8 @@
   let classifierModel = null;
   let modelLoadPromise = null;
   let classifierLoadPromise = null;
+  let faceModelsReady = false;
+  let faceModelsPromise = null;
   let lastPredictions = null;
   let lastClassifications = null;
   let lastDetectionW = 0;
@@ -384,6 +412,7 @@
   const scaleVal         = document.getElementById("emojiScaleVal");
   const atmosphereSlider = document.getElementById("atmosphere");
   const atmosphereVal    = document.getElementById("atmosphereVal");
+  const emotionToggle    = document.getElementById("emotionToggle");
   const exportJpgBtn     = document.getElementById("exportJpgBtn");
   const downloadBtn      = document.getElementById("downloadBtn");
 
@@ -457,6 +486,65 @@
     clock:"🕰️",vase:"🏺",scissors:"✂️","teddy bear":"🧸",
     "hair drier":"💨",toothbrush:"🪥"
   };
+
+  // -----------------------------------------------------------------------
+  // Emotion detection (optional, face-api.js)
+  // -----------------------------------------------------------------------
+  const EMOTION_EMOJI = {
+    neutral:"🙂",happy:"😄",sad:"😢",angry:"😠",
+    fearful:"😨",disgusted:"🤢",surprised:"😲"
+  };
+  const FACE_MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
+
+  function ensureFaceModels() {
+    if (faceModelsReady) return Promise.resolve();
+    if (faceModelsPromise) return faceModelsPromise;
+    faceModelsPromise = (async () => {
+      if (typeof faceapi === "undefined") {
+        await loadScript("https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js");
+      }
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+        faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL)
+      ]);
+      faceModelsReady = true;
+    })();
+    return faceModelsPromise;
+  }
+
+  async function detectEmotionForPerson(p) {
+    try {
+      const [bx, by, bw, bh] = p.bbox; // detection-canvas coords
+      const scaleX = previewImg.naturalWidth / lastDetectionW;
+      const scaleY = previewImg.naturalHeight / lastDetectionH;
+      // The bbox covers the whole body — the face sits in the upper portion.
+      const headH = bh * 0.42;
+      const sx = Math.max(0, (bx - bw * 0.08) * scaleX);
+      const sy = Math.max(0, (by - bh * 0.04) * scaleY);
+      const sw = Math.min(previewImg.naturalWidth - sx, bw * 1.16 * scaleX);
+      const sh = Math.min(previewImg.naturalHeight - sy, headH * scaleY);
+      if (sw < 24 || sh < 24) { p.emotionEmoji = null; return; }
+      const crop = document.createElement("canvas");
+      crop.width = Math.round(sw); crop.height = Math.round(sh);
+      crop.getContext("2d").drawImage(previewImg, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+      const result = await faceapi
+        .detectSingleFace(crop, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 }))
+        .withFaceExpressions();
+      if (!result || !result.expressions) { p.emotionEmoji = null; return; }
+      const top = Object.entries(result.expressions).sort((a, b) => b[1] - a[1])[0];
+      p.emotionEmoji = (top && EMOTION_EMOJI[top[0]]) || null;
+    } catch (e) {
+      console.warn("Emotion detection failed for one person:", e);
+      p.emotionEmoji = null;
+    }
+  }
+
+  async function ensureEmotionsForPredictions(predictions) {
+    const persons = predictions.filter(p => p.class === "person" && p.emotionEmoji === undefined);
+    if (!persons.length) return;
+    await ensureFaceModels();
+    for (const p of persons) await detectEmotionForPerson(p);
+  }
 
   // -----------------------------------------------------------------------
   // MobileNet keyword map
@@ -675,7 +763,7 @@
   function scaleDisplayText(v){const s=sliderToScale(v);return s>=10?`×${s.toFixed(0)}`:`×${s.toFixed(1)}`;}
 
   function buildCollageLayout(img,predictions,classifications,opts) {
-    const{maxObjects,atmosphereCount,scale,detectionW,detectionH}=opts;
+    const{maxObjects,atmosphereCount,scale,detectionW,detectionH,emotionEnabled}=opts;
     const bboxW=detectionW||img.naturalWidth,bboxH=detectionH||img.naturalHeight;
     const w=img.naturalWidth,h=img.naturalHeight;
     const layout=[],S=scale||1;
@@ -699,7 +787,7 @@
     const fgEmoji=new Set();
     for(const p of ranked){
       const[bx,by,bw,bh]=p.bbox;
-      const ch=COCO_EMOJI_MAP[p.class]||"❔";
+      const ch=(emotionEnabled&&p.emotionEmoji)?p.emotionEmoji:(COCO_EMOJI_MAP[p.class]||"❔");
       fgEmoji.add(ch);
       const cxPct=((bx+bw/2)/bboxW)*100,cyPct=((by+bh/2)/bboxH)*100;
       const boxSpan=Math.max(bw,bh),refSpan=Math.min(bboxW,bboxH);
@@ -799,11 +887,27 @@
       maxObjects:parseInt(maxObjectsSlider.value,10),
       atmosphereCount:parseInt(atmosphereSlider.value,10),
       scale:sliderToScale(scaleSlider.value),
-      detectionW:lastDetectionW,detectionH:lastDetectionH
+      detectionW:lastDetectionW,detectionH:lastDetectionH,
+      emotionEnabled:emotionToggle.checked
     });
     currentCollage=layout;
     renderCollage(layout);
     updateButtons();
+  }
+
+  async function handleEmotionToggleChange() {
+    if(!emotionToggle.checked||!lastPredictions){rebuildCollage();return;}
+    try{
+      showLoading("Detecting emotions…");
+      statusEl.textContent="Detecting emotions…";
+      await ensureEmotionsForPredictions(lastPredictions);
+    }catch(e){
+      console.error(e);
+      statusEl.textContent="Emotion detection failed — falling back to default face.";
+    }finally{
+      hideLoading();
+      rebuildCollage();
+    }
   }
 
   function updateButtons(){
@@ -828,6 +932,13 @@
       const threshold=parseFloat(confidenceSlider.value);
       const predictions=lastPredictions.filter(p=>p.score>=threshold);
 
+      if(emotionToggle.checked){
+        showLoading("Detecting emotions…");
+        statusEl.textContent="Detecting emotions…";
+        try{ await ensureEmotionsForPredictions(lastPredictions); }
+        catch(e){ console.warn("Emotion detection failed:",e); }
+      }
+
       if(!lastClassifications){
         showLoading("Classifying scene…");
         statusEl.textContent="Classifying scene…";
@@ -843,7 +954,8 @@
         maxObjects:parseInt(maxObjectsSlider.value,10),
         atmosphereCount:parseInt(atmosphereSlider.value,10),
         scale:sliderToScale(scaleSlider.value),
-        detectionW:lastDetectionW,detectionH:lastDetectionH
+        detectionW:lastDetectionW,detectionH:lastDetectionH,
+        emotionEnabled:emotionToggle.checked
       });
       currentCollage=layout;
       renderCollage(layout);
@@ -937,6 +1049,7 @@
   confidenceSlider.addEventListener("change",()=>{if(lastPredictions)rebuildCollage();});
   atmosphereSlider.addEventListener("input",()=>{atmosphereVal.textContent=atmosphereSlider.value;});
   atmosphereSlider.addEventListener("change",()=>{if(lastPredictions)rebuildCollage();});
+  emotionToggle.addEventListener("change",handleEmotionToggleChange);
 
   // -----------------------------------------------------------------------
   // File input / drag-drop
