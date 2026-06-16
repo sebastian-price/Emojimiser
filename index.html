@@ -1030,6 +1030,25 @@
     return layout.map(it=>`${it.ch}|${it.xPct.toFixed(1)}|${it.yPct.toFixed(1)}|${it.sizePct.toFixed(1)}|${it.rotation}|${it.layer}`).join("\n");
   }
 
+  function formatBytes(bytes){
+    if(bytes<1024) return `${bytes} B`;
+    if(bytes<1024*1024) return `${(bytes/1024).toFixed(1)} KB`;
+    return `${(bytes/(1024*1024)).toFixed(2)} MB`;
+  }
+
+  // Shows how the encoded emoji collage compares in size to the original
+  // photo — the whole point of the "creative reduction" exercise.
+  function updateDetectionMeta(layout,predictions,classifications){
+    const encodedBytes=new TextEncoder().encode(encodeCollage(layout)).length;
+    let savings="";
+    if(currentImageInfo&&currentImageInfo.fileSize){
+      const ratio=currentImageInfo.fileSize/encodedBytes;
+      savings=ratio>=1?` · ${formatBytes(encodedBytes)} (${ratio.toFixed(0)}× smaller)`
+                      :` · ${formatBytes(encodedBytes)} (${(1/ratio).toFixed(1)}× larger)`;
+    }
+    detectionSumEl.textContent=`${predictions.length} obj · ${(classifications||[]).length} scene${savings}`;
+  }
+
   function rebuildCollage() {
     if(!previewImg.complete||!previewImg.naturalWidth)return;
     if(!lastPredictions){runCreativeReduction(true);return;}
@@ -1045,6 +1064,7 @@
     currentCollage=layout;
     renderCollage(layout);
     updateButtons();
+    updateDetectionMeta(layout,predictions,lastClassifications);
   }
 
   async function handleEmotionToggleChange() {
@@ -1118,7 +1138,7 @@
       const sceneLabels=(lastClassifications||[]).slice(0,3).map(c=>c.className.split(",")[0].trim());
       const allLabels=[...cocoLabels,...sceneLabels].slice(0,6);
       statusEl.textContent=allLabels.length?`Found: ${allLabels.join(" · ")}`:"No detections — try lowering the confidence threshold.";
-      detectionSumEl.textContent=`${predictions.length} obj · ${(lastClassifications||[]).length} scene`;
+      updateDetectionMeta(layout,predictions,lastClassifications);
 
     }catch(err){
       hideLoading();
