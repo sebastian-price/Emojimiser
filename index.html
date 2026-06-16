@@ -248,7 +248,7 @@
   <!-- Left sidebar -->
   <div id="pane-ctl">
     <div class="ctl-head">
-      <h1>emojimiser</h1>
+      <h1>Emojimiser</h1>
       <p>Photo &gt; emoji. Runs entirely in your browser — nothing is uploaded.</p>
     </div>
 
@@ -281,7 +281,7 @@
         <h2>Appearance</h2>
         <div class="ctl">
           <div class="row"><label for="emojiScale">Scale</label><span class="val" id="emojiScaleVal">×25</span></div>
-          <input type="range" id="emojiScale" min="1" max="100" step="1" value="29">
+          <input type="range" id="emojiScale" min="1" max="100" step="1" value="50">
         </div>
         <div class="ctl">
           <div class="row"><label for="atmosphere">Atmosphere</label><span class="val" id="atmosphereVal">0</span></div>
@@ -348,6 +348,36 @@
 (function () {
   "use strict";
 
+  // -----------------------------------------------------------------------
+  // Persistent model cache (Cache Storage API) — keeps the multi-MB model
+  // weight files around across reloads, independent of the browser's normal
+  // HTTP disk cache (which can be evicted or skipped in private windows).
+  // -----------------------------------------------------------------------
+  (function installModelCache() {
+    if (!("caches" in window) || !("fetch" in window)) return;
+    const CACHE_NAME = "emojimiser-model-cache-v1";
+    const CACHEABLE_HOSTS = ["cdn.jsdelivr.net", "justadudewhohacks.github.io"];
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async function (input, init) {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      let host = "";
+      try { host = new URL(url, location.href).hostname; } catch (e) {}
+      if (!CACHEABLE_HOSTS.includes(host) || (init && init.method && init.method !== "GET")) {
+        return nativeFetch(input, init);
+      }
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const cached = await cache.match(url);
+        if (cached) return cached;
+        const response = await nativeFetch(input, init);
+        if (response && response.ok) cache.put(url, response.clone());
+        return response;
+      } catch (e) {
+        return nativeFetch(input, init);
+      }
+    };
+  })();
+
   const EMOJI_SOURCE = [
     "🟥","🟧","🟨","🟩","🟦","🟪","🟫","⬛","⬜",
     "🔴","🟠","🟡","🟢","🔵","🟣","🟤","⚫","⚪",
@@ -385,8 +415,6 @@
   let classifierModel = null;
   let modelLoadPromise = null;
   let classifierLoadPromise = null;
-  let faceModelsReady = false;
-  let faceModelsPromise = null;
   let lastPredictions = null;
   let lastClassifications = null;
   let lastDetectionW = 0;
@@ -489,27 +517,154 @@
 
   // -----------------------------------------------------------------------
   // Emotion detection (optional, face-api.js)
+  //
+  // face-api.js bundles its own (old) TensorFlow.js core. Loading it into
+  // this page's main window clashes with the @tensorflow/tfjs build already
+  // running here (duplicate backend registration, then a fatal internal
+  // error) — that was the cause of the "stuck loading" bug. To avoid the
+  // clash entirely, face-api.js is loaded inside a separate, isolated
+  // <iframe> with its own independent JS global scope, so its bundled
+  // TensorFlow.js never touches the main page's instance. We hand it a
+  // cropped face image and get back a single emotion label.
   // -----------------------------------------------------------------------
   const EMOTION_EMOJI = {
     neutral:"🙂",happy:"😄",sad:"😢",angry:"😠",
     fearful:"😨",disgusted:"🤢",surprised:"😲"
   };
-  const FACE_MODEL_URL = "https://justadudewhohacks.github.io/face-api.js/models";
 
-  function ensureFaceModels() {
-    if (faceModelsReady) return Promise.resolve();
-    if (faceModelsPromise) return faceModelsPromise;
-    faceModelsPromise = (async () => {
-      if (typeof faceapi === "undefined") {
-        await loadScript("https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js");
+  let faceWorkerFrame = null;
+  let faceWorkerReadyPromise = null;
+  let faceDetectSeq = 0;
+  const faceDetectCallbacks = new Map();
+
+  function faceWorkerSrcDoc() {
+    return `<!DOCTYPE html><html><head></head><body><script>
+(function(){
+  "use strict";
+  var CACHE_NAME="emojimiser-model-cache-v1";
+  var CACHEABLE_HOSTS=["cdn.jsdelivr.net","justadudewhohacks.github.io"];
+  if("caches" in window && "fetch" in window){
+    var nativeFetch=window.fetch.bind(window);
+    window.fetch=function(input,init){
+      var url=typeof input==="string"?input:(input&&input.url)||"";
+      var host="";
+      try{ host=new URL(url,location.href).hostname; }catch(e){}
+      if(CACHEABLE_HOSTS.indexOf(host)===-1||(init&&init.method&&init.method!=="GET")){
+        return nativeFetch(input,init);
       }
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
-        faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL)
-      ]);
-      faceModelsReady = true;
-    })();
-    return faceModelsPromise;
+      return caches.open(CACHE_NAME).then(function(cache){
+        return cache.match(url).then(function(cached){
+          if(cached) return cached;
+          return nativeFetch(input,init).then(function(response){
+            if(response&&response.ok) cache.put(url,response.clone());
+            return response;
+          });
+        });
+      }).catch(function(){ return nativeFetch(input,init); });
+    };
+  }
+  var ready=false, loadingPromise=null;
+  function loadScript(src){
+    return new Promise(function(resolve,reject){
+      var s=document.createElement("script");
+      s.src=src; s.crossOrigin="anonymous";
+      s.onload=resolve; s.onerror=function(){reject(new Error("load failed: "+src));};
+      document.head.appendChild(s);
+    });
+  }
+  function ensureReady(){
+    if(ready) return Promise.resolve();
+    if(loadingPromise) return loadingPromise;
+    var MODEL_URL="https://justadudewhohacks.github.io/face-api.js/models";
+    loadingPromise=loadScript("https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js")
+      .then(function(){
+        return Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+        ]);
+      })
+      .then(function(){ ready=true; });
+    return loadingPromise;
+  }
+  window.addEventListener("message",function(ev){
+    var msg=ev.data;
+    if(!msg||typeof msg!=="object") return;
+    if(msg.type==="init"){
+      ensureReady().then(function(){
+        parent.postMessage({type:"ready"},"*");
+      }).catch(function(e){
+        parent.postMessage({type:"init-error",error:String(e&&e.message||e)},"*");
+      });
+      return;
+    }
+    if(msg.type==="detect"){
+      var id=msg.id, bitmap=msg.bitmap, w=msg.w, h=msg.h;
+      ensureReady().then(function(){
+        var canvas=document.createElement("canvas");
+        canvas.width=w; canvas.height=h;
+        canvas.getContext("2d").drawImage(bitmap,0,0,w,h);
+        if(bitmap.close) bitmap.close();
+        return faceapi
+          .detectSingleFace(canvas,new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.3}))
+          .withFaceExpressions();
+      }).then(function(result){
+        if(!result||!result.expressions){ parent.postMessage({type:"detect-result",id:id,label:null},"*"); return; }
+        var entries=Object.keys(result.expressions).map(function(k){return [k,result.expressions[k]];});
+        entries.sort(function(a,b){return b[1]-a[1];});
+        parent.postMessage({type:"detect-result",id:id,label:entries.length?entries[0][0]:null},"*");
+      }).catch(function(e){
+        parent.postMessage({type:"detect-result",id:id,label:null,error:String(e&&e.message||e)},"*");
+      });
+    }
+  });
+})();
+<\/script></body></html>`;
+  }
+
+  function ensureFaceWorker() {
+    if (faceWorkerReadyPromise) return faceWorkerReadyPromise;
+    faceWorkerReadyPromise = new Promise((resolve, reject) => {
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.srcdoc = faceWorkerSrcDoc();
+      function onMsg(ev) {
+        if (ev.source !== iframe.contentWindow) return;
+        const msg = ev.data;
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "ready") {
+          window.removeEventListener("message", onMsg);
+          resolve();
+        } else if (msg.type === "init-error") {
+          window.removeEventListener("message", onMsg);
+          reject(new Error(msg.error || "face model worker failed to initialise"));
+        }
+      }
+      window.addEventListener("message", onMsg);
+      iframe.addEventListener("load", () => {
+        iframe.contentWindow.postMessage({ type: "init" }, "*");
+      });
+      document.body.appendChild(iframe);
+      faceWorkerFrame = iframe;
+    });
+    return faceWorkerReadyPromise;
+  }
+
+  window.addEventListener("message", (ev) => {
+    const msg = ev.data;
+    if (!msg || msg.type !== "detect-result") return;
+    const cb = faceDetectCallbacks.get(msg.id);
+    if (cb) {
+      faceDetectCallbacks.delete(msg.id);
+      cb(msg.label || null);
+    }
+  });
+
+  function requestFaceDetect(bitmap, w, h) {
+    return new Promise((resolve) => {
+      const id = ++faceDetectSeq;
+      faceDetectCallbacks.set(id, resolve);
+      faceWorkerFrame.contentWindow.postMessage({ type: "detect", id, bitmap, w, h }, "*", [bitmap]);
+    });
   }
 
   async function detectEmotionForPerson(p) {
@@ -527,12 +682,9 @@
       const crop = document.createElement("canvas");
       crop.width = Math.round(sw); crop.height = Math.round(sh);
       crop.getContext("2d").drawImage(previewImg, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
-      const result = await faceapi
-        .detectSingleFace(crop, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 }))
-        .withFaceExpressions();
-      if (!result || !result.expressions) { p.emotionEmoji = null; return; }
-      const top = Object.entries(result.expressions).sort((a, b) => b[1] - a[1])[0];
-      p.emotionEmoji = (top && EMOTION_EMOJI[top[0]]) || null;
+      const bitmap = await createImageBitmap(crop);
+      const label = await requestFaceDetect(bitmap, crop.width, crop.height);
+      p.emotionEmoji = (label && EMOTION_EMOJI[label]) || null;
     } catch (e) {
       console.warn("Emotion detection failed for one person:", e);
       p.emotionEmoji = null;
@@ -542,7 +694,7 @@
   async function ensureEmotionsForPredictions(predictions) {
     const persons = predictions.filter(p => p.class === "person" && p.emotionEmoji === undefined);
     if (!persons.length) return;
-    await ensureFaceModels();
+    await ensureFaceWorker();
     for (const p of persons) await detectEmotionForPerson(p);
   }
 
